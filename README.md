@@ -48,7 +48,8 @@ pip install -r requirements.txt
 
 ## 6. Créer les clés API (gratuites)
 
-L'application a besoin de deux clés API gratuites pour fonctionner :
+L'application a besoin de deux clés API gratuites pour fonctionner, et d'une
+troisième seulement si tu veux utiliser les photos (facultatif) :
 
 ### Clé Groq (pour que l'IA rédige le diagnostic)
 
@@ -65,15 +66,26 @@ L'application a besoin de deux clés API gratuites pour fonctionner :
 3. Le compte gratuit donne 1000 recherches par mois, largement suffisant
    pour ce projet.
 
+### Clé Gemini (facultative, seulement pour analyser des photos)
+
+1. Va sur [aistudio.google.com](https://aistudio.google.com) et connecte-toi
+   avec un compte Google.
+2. Cherche le bouton **"Get API key"** (ou **"Obtenir une clé API"**), puis
+   **"Create API key"**.
+3. Copie la clé affichée. L'utilisation de base est gratuite.
+4. Si tu ne mets pas cette clé, l'application fonctionne quand même très
+   bien, simplement sans la possibilité de prendre des photos.
+
 ## 7. Créer le fichier .env
 
 1. Fais une copie du fichier `.env.example` et renomme-la en `.env`.
 2. Ouvre ce fichier `.env` avec un éditeur de texte (le Bloc-notes par exemple).
-3. Complète-le avec tes deux clés, comme ceci :
+3. Complète-le avec tes clés, comme ceci :
 
 ```
 GROQ_API_KEY=gsk_ta_cle_groq_ici
 TAVILY_API_KEY=tvly_ta_cle_tavily_ici
+GEMINI_API_KEY=ta_cle_gemini_ici
 ```
 
 4. Enregistre et ferme le fichier. **Ne partage jamais ce fichier** et ne le

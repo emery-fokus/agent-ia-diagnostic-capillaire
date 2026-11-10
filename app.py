@@ -4,10 +4,12 @@ Une page Streamlit pose des questions sur les cheveux, puis une IA (Groq)
 propose un diagnostic et des produits réels trouvés sur internet (Tavily).
 """
 
+import base64
 import os
 
 import streamlit as st
 from dotenv import load_dotenv
+from google import genai
 from groq import Groq
 from tavily import TavilyClient
 
@@ -34,6 +36,10 @@ def obtenir_une_cle_api(nom_de_la_cle):
 # Il est gratuit (dans la limite d'un certain nombre de messages par jour).
 MODELE_GROQ = "openai/gpt-oss-120b"
 
+# Le modèle d'IA de Google Gemini que l'on utilise pour regarder les photos.
+# Il est gratuit aussi, et sait analyser des images (contrairement à Groq).
+MODELE_GEMINI = "gemini-3.6-flash"
+
 # Ces instructions sont envoyées à l'IA avant chaque question.
 # Elles définissent les règles que l'IA doit toujours respecter.
 PROMPT_SYSTEME = """Tu es un assistant spécialisé en soins capillaires, qui s'adresse à un public francophone.
@@ -47,12 +53,30 @@ RÈGLES À RESPECTER ABSOLUMENT :
    Tu n'inventes jamais un produit, une marque, un prix ou un lien qui ne serait pas
    présent dans ces résultats de recherche.
 3. Tu réponds toujours en français, avec des mots simples et bienveillants.
+4. Si le message contient une "fiche décrivant ce qui est visible sur les photos",
+   utilise-la pour enrichir ton diagnostic. Rappelle que les informations qui ne se
+   voient pas sur une photo (comme la porosité) restent des estimations.
 
 FORMAT DE LA RÉPONSE (en Markdown) :
 - Un court diagnostic (quelques phrases).
 - Une liste de 3 à 5 produits recommandés, chacun avec : nom, marque, raison du choix,
   prix indicatif si disponible, et le lien trouvé.
 - Une routine simple, étape par étape.
+"""
+
+# Ces instructions sont envoyées à l'IA Gemini avant qu'elle ne regarde les photos.
+PROMPT_SYSTEME_PHOTOS = """Tu regardes des photos de cheveux envoyées par une personne.
+
+RÈGLES À RESPECTER ABSOLUMENT :
+1. Tu ne poses jamais de diagnostic médical.
+2. Tu décris uniquement ce que tu vois vraiment sur les photos (type de boucle,
+   densité apparente, état des pointes, aspect du cuir chevelu). Tu n'inventes rien
+   que tu ne peux pas voir sur les photos.
+3. La porosité et l'élasticité ne se voient pas sur une photo : base-toi uniquement
+   sur ce que la personne a déclaré, et précise bien que ce sont des "estimations
+   déclarées par la personne", pas des observations que tu as faites toi-même.
+4. Réponds en français, avec des mots simples, sous forme d'une courte fiche
+   (quelques lignes). Ne propose pas de produits ici, ce n'est pas ton rôle.
 """
 
 
@@ -87,6 +111,41 @@ def rechercher_des_produits_sur_internet(requete):
     return reponse["results"]
 
 
+def convertir_une_photo_en_base64(photo):
+    """Transforme une photo prise par la personne en un format que l'on
+    peut envoyer à l'IA Gemini : du texte encodé en base64, avec son type
+    (JPEG, PNG...). C'est la façon dont Gemini attend de recevoir une image.
+    """
+    contenu = photo.getvalue()
+    texte_encode = base64.b64encode(contenu).decode("utf-8")
+    return {"type": "image", "data": texte_encode, "mime_type": photo.type}
+
+
+def analyser_les_photos_avec_gemini(photos, cheveux_sechent_vite, meche_revient_en_place):
+    """Envoie les photos des cheveux à l'IA Gemini, avec les deux informations
+    que l'on ne peut pas voir sur une photo (porosité et élasticité), et
+    renvoie une petite fiche décrivant ce qui est visible.
+    """
+    cle_api_gemini = obtenir_une_cle_api("GEMINI_API_KEY")
+    client_gemini = genai.Client(api_key=cle_api_gemini)
+
+    texte_de_la_demande = "Voici des photos de cheveux. Décris ce que tu observes.\n"
+    texte_de_la_demande += f"La personne dit que ses cheveux sèchent vite après le lavage : {cheveux_sechent_vite}\n"
+    texte_de_la_demande += f"La personne dit qu'une mèche mouillée étirée revient en place : {meche_revient_en_place}\n"
+
+    contenu_envoye = []
+    contenu_envoye.append({"type": "text", "text": texte_de_la_demande})
+    for photo in photos:
+        contenu_envoye.append(convertir_une_photo_en_base64(photo))
+
+    reponse = client_gemini.interactions.create(
+        model=MODELE_GEMINI,
+        system_instruction=PROMPT_SYSTEME_PHOTOS,
+        input=contenu_envoye,
+    )
+    return reponse.output_text
+
+
 def construire_le_message_pour_lia(
     type_cheveux,
     soucis,
@@ -95,6 +154,7 @@ def construire_le_message_pour_lia(
     pays,
     autre_chose,
     resultats_de_recherche,
+    fiche_profil_photos,
 ):
     """Rassemble les réponses du formulaire et les résultats de recherche
     en un seul texte clair, qui sera envoyé à l'IA.
@@ -119,6 +179,11 @@ def construire_le_message_pour_lia(
         message += f"- Titre : {resultat['title']}\n"
         message += f"  Lien : {resultat['url']}\n"
         message += f"  Extrait : {resultat['content']}\n"
+
+    if fiche_profil_photos:
+        message += "\nVoici une fiche décrivant ce qui est visible sur les photos "
+        message += "envoyées par la personne :\n"
+        message += fiche_profil_photos + "\n"
 
     return message
 
@@ -189,16 +254,65 @@ pays = st.text_input("Dans quel pays habites-tu ?", value="Cameroun")
 # Question 6 : un champ libre pour préciser quelque chose en plus.
 autre_chose = st.text_area("Autre chose à préciser ? (facultatif)")
 
+# Questions 7 (facultatives) : des photos prises en direct pour affiner le
+# diagnostic. st.camera_input ouvre vraiment la caméra dans le navigateur.
+# Totalement facultatives : l'application fonctionne très bien sans elles,
+# juste avec le questionnaire ci-dessus.
+st.subheader("Photos (facultatif, pour un diagnostic plus précis)")
+photo_profil = st.camera_input("Étape 1 : tourne la tête et montre tes cheveux de profil")
+photo_pointes = st.camera_input("Étape 2 : montre tes pointes de près")
+photo_meche = st.camera_input("Étape 3 : étire une mèche de cheveux et prends-la en photo")
+photo_cuir_chevelu = st.camera_input("Étape 4 : montre ton cuir chevelu, en écartant tes cheveux")
+
+# On rassemble les photos prises dans une liste (certaines peuvent être vides).
+photos = []
+if photo_profil is not None:
+    photos.append(photo_profil)
+if photo_pointes is not None:
+    photos.append(photo_pointes)
+if photo_meche is not None:
+    photos.append(photo_meche)
+if photo_cuir_chevelu is not None:
+    photos.append(photo_cuir_chevelu)
+
+# Ces deux informations ne se voient pas sur une photo, on les demande donc
+# directement à la personne.
+cheveux_sechent_vite = st.radio(
+    "Tes cheveux sèchent-ils vite après le lavage ?",
+    ["Oui", "Non", "Je ne sais pas"],
+)
+meche_revient_en_place = st.radio(
+    "Si tu étires une mèche mouillée, revient-elle en place ?",
+    ["Oui", "Non", "Je ne sais pas"],
+)
+
 # Le bouton qui déclenche l'analyse.
 if st.button("Analyser mes cheveux"):
-    # On vérifie d'abord que les deux clés API sont bien présentes.
-    if not obtenir_une_cle_api("GROQ_API_KEY") or not obtenir_une_cle_api("TAVILY_API_KEY"):
+    # On vérifie d'abord que les clés API nécessaires sont bien présentes.
+    cles_de_base_absentes = not obtenir_une_cle_api("GROQ_API_KEY") or not obtenir_une_cle_api("TAVILY_API_KEY")
+    photos_envoyees = len(photos) > 0
+    cle_gemini_absente = photos_envoyees and not obtenir_une_cle_api("GEMINI_API_KEY")
+
+    if cles_de_base_absentes:
         st.error(
             "Clé API manquante. Vérifie que le fichier .env contient bien "
             "GROQ_API_KEY et TAVILY_API_KEY."
         )
+    elif cle_gemini_absente:
+        st.error(
+            "Tu as pris des photos, mais la clé GEMINI_API_KEY est absente. "
+            "Ajoute-la dans le fichier .env, ou enlève les photos pour continuer "
+            "sans elles."
+        )
     else:
         try:
+            fiche_profil_photos = ""
+            if photos_envoyees:
+                with st.spinner("Analyse des photos..."):
+                    fiche_profil_photos = analyser_les_photos_avec_gemini(
+                        photos, cheveux_sechent_vite, meche_revient_en_place
+                    )
+
             with st.spinner("Recherche de produits sur internet..."):
                 requete = construire_la_requete_de_recherche(
                     type_cheveux, soucis, etat_pointes, pays
@@ -214,6 +328,7 @@ if st.button("Analyser mes cheveux"):
                     pays,
                     autre_chose,
                     resultats_de_recherche,
+                    fiche_profil_photos,
                 )
                 reponse_de_lia = demander_a_groq(message_pour_lia)
 
