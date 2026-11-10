@@ -208,6 +208,11 @@ def demander_a_groq(message_utilisateur):
 # qui utilise l'application dans son navigateur.
 # ----------------------------------------------------------------------------
 
+# Ceci doit être le tout premier appel à Streamlit. Ça change le titre affiché
+# dans l'onglet du navigateur, et le nom utilisé quand on ajoute le site à
+# l'écran d'accueil d'un téléphone (au lieu du nom générique "Streamlit").
+st.set_page_config(page_title="Diagnostic capillaire", page_icon="💇")
+
 st.title("Agent IA de diagnostic capillaire")
 st.write(
     "Réponds aux questions ci-dessous, puis clique sur le bouton pour recevoir "
