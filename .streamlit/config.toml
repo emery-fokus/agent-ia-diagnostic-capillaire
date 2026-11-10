@@ -1,0 +1,5 @@
+# Ce fichier cache la petite barre d'icônes (Fork, GitHub, menu) que
+# Streamlit affiche par défaut en haut à droite de la page, pour que
+# la présentation soit plus propre.
+[client]
+toolbarMode = "minimal"
